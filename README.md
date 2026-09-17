@@ -80,19 +80,47 @@ champion is what gets saved to `model.joblib`.
 
 ## Results
 
-Numbers below are illustrative only until re-run: an earlier version of
-this table (Linear Regression 13.02 test MAE, Random Forest 10.36) did
-not match what the notebook actually produced, and has been removed.
+Trained on Colab (train n=36,069, test n=9,433, chronological split).
 
-Run `train_model.py` (or `model_building.ipynb`) and fill in real
-numbers, including:
-- naive baseline MAE (verified above: 7.63 min)
-- each model's train & test MAE, RMSE, R²
-- the tournament's per-round `p_value` and final champion
+**Naive baseline** (predict training median): test MAE 7.63 min, test R² -0.00.
+
+| Model | Train MAE | Test MAE | Train RMSE | Test RMSE | Train R² | Test R² |
+|---|---|---|---|---|---|---|
+| Linear Regression | 4.79 | 4.81 | 6.02 | 6.06 | 0.59 | 0.59 |
+| Random Forest (tuned) | 2.18 | 3.32 | 2.77 | 4.21 | 0.91 | 0.80 |
+| XGBoost (GPU, untuned) | 2.91 | 3.34 | 3.66 | 4.22 | 0.85 | 0.80 |
+| LightGBM (untuned) | 3.09 | 3.35 | 3.88 | 4.24 | 0.83 | 0.80 |
+
+All three tree models comfortably beat the naive baseline and Linear
+Regression. Random Forest, XGBoost and LightGBM land within ~0.03 minutes
+of each other on test MAE, and the tournament confirms none of that gap is
+statistically real (see below) — so as trained here they're
+interchangeable, not one clearly best.
+
+**Tournament** (champion/challenger, paired Wilcoxon signed-rank test on
+per-row absolute test error):
+
+| Round | p-value | Result |
+|---|---|---|
+| Linear Regression vs Random Forest | 1.16e-292 | Random Forest wins (significant) |
+| Random Forest vs XGBoost | 0.729 | No significant difference — champion holds |
+| Random Forest vs LightGBM | 0.531 | No significant difference — champion holds |
+
+**Final champion: Random Forest** — saved to `model.joblib`.
+
+Worth flagging: Random Forest is the only model that got hyperparameter
+search (`RandomizedSearchCV`, 8 candidates × 3-fold CV); XGBoost and
+LightGBM ran with fixed, untuned hyperparameters. That's the likely reason
+Random Forest edges the other two rather than a real algorithmic
+advantage — a fair comparison would tune all three equally before
+declaring a winner (see Future Improvements).
 
 ---
 
 ## Future Improvements
+- Tune XGBoost and LightGBM with the same `RandomizedSearchCV` treatment
+  Random Forest got — right now Random Forest's win in the tournament may
+  just reflect that it's the only tuned model, not a real algorithmic edge
 - Let XGBoost/LightGBM handle missing values natively instead of running
   them through the shared KNN-imputation step (would need each model on
   its own preprocessing branch, and a separate A/B test to check it's
