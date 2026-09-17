@@ -1,7 +1,22 @@
+# environments
 .venv/
 venv/
 ENV/
+
+# python
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# jupyter
 .ipynb_checkpoints/
+
+# trained model artifacts (regenerate with `python -m swiggy_delivery.train`)
+models/*
+!models/.gitkeep
+
+# os
 .DS_Store

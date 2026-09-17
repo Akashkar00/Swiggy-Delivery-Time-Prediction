@@ -1,173 +1,153 @@
 # Swiggy Delivery Time Prediction
 
-This project aims to predict the **delivery time of Swiggy food orders** using machine learning models based on rider details, weather, traffic conditions, and geolocation data.
+Predicts how long a Swiggy food order will take to deliver, from rider
+details, weather, traffic, order type and pickup/drop-off distance.
 
----
-
-## Problem Statement
-Predict the food order delivery time based on real-world factors like rider attributes, vehicle type, weather, and traffic. This enables:
-- Optimizing delivery operations
-- Improving customer satisfaction
-- Efficient resource allocation
-
----
-
-## Business Use Case
-- **Customer Satisfaction:** Deliver accurate ETAs and improve transparency.
-- **Operational Efficiency:** Better resource and route management for riders.
-- **Financial Impact:** Reduce compensation for delays, optimize fuel costs, and boost customer retention.
-
----
-
-## Dataset
-The dataset (`swiggy.csv`) contains:
-- Rider details (age, ratings)
-- Weather conditions
-- Traffic density
-- Delivery distance (calculated using geolocation)
-- Delivery time in minutes
-
----
-
-## ML Workflow
-
-### 1. Data Preprocessing
-- Handle missing values and outliers
-- Feature engineering (delivery distance, time-based features)
-- Encoding categorical variables
-
-### 2. Train/Test Split
-Chronological, not random: the model predicts an ETA for orders that
-haven't happened yet, so it's tested on the most recent slice of orders
-(the last 20% by `order_date`), not on a random sample that could put
-same-day orders on both sides of the split.
-
-### 3. Baseline
-Before any model, a naive baseline (always predict the training set's
-median delivery time) is evaluated on the same held-out rows as every
-real model. Test MAE: **7.63 minutes** (n=45,502; run `train_model.py`
-to reproduce). Any model has to beat this by a real margin to be worth
-using.
-
-### 4. Model Building
-Models compared:
-- **Linear Regression**
-- **Random Forest Regressor**, lightly tuned with cross-validated random
-  search (`RandomizedSearchCV`) rather than a single fit on default
-  hyperparameters.
-- **XGBoost** — trains on GPU automatically when one is available (e.g. a
-  Colab GPU runtime), falls back to CPU otherwise.
-- **LightGBM** — CPU only; GPU LightGBM needs a special build not
-  guaranteed to be present on a stock Colab image.
-- **TabPFN** — a pretrained tabular foundation model (Prior Labs) that
-  does in-context learning instead of training from scratch, so it needs
-  no hyperparameter search. Its attention scales roughly quadratically
-  with the number of rows given as context, so it isn't built for a
-  training set this size: training is subsampled down to a fixed cap
-  (`TABPFN_MAX_TRAIN_SAMPLES`, seeded for reproducibility) before fitting.
-  Test-set evaluation still uses the full held-out set, so its tournament
-  comparison against the other models stays valid — but its train-set
-  metrics reflect only the subsample it saw, not the full training set.
-
-All five reuse the same imputation + encoding pipeline, so they're
-compared on identical features (TabPFN additionally on fewer rows, as
-above).
-
-### 5. Model Evaluation
-Metrics: MAE, RMSE, R² — each reported for both train and test so an
-overfitting gap is visible, not hidden.
-
-### 6. Model Tournament (A/B Testing)
-Rather than eyeballing five models' aggregate metrics side by side,
-`ab_test.py` runs a champion/challenger tournament: starting from Linear
-Regression, each next model (Random Forest, then XGBoost, then LightGBM,
-then TabPFN) only takes the title if its per-row absolute errors on the
-*same* test rows are significantly lower by a paired Wilcoxon signed-rank
-test — not just numerically lower, which could be noise on this test set.
-The final champion is what gets saved to `model.joblib`.
+The focus is on evaluating models honestly, not just posting a high score:
+a chronological train/test split, a naive baseline every model has to beat,
+and a champion/challenger model tournament where a challenger only wins if
+a paired significance test backs it up.
 
 ---
 
 ## Results
 
-Trained on Colab (train n=36,069, test n=9,433, chronological split).
-Numbers below are from before TabPFN was added — Linear Regression,
-Random Forest, XGBoost and LightGBM are unaffected (same seeds, same
-data) and won't change on a re-run, but TabPFN's row and the tournament's
-final champion are pending a re-run with the updated notebook.
+Chronological split: train n=36,069 (orders up to 2022-03-28), test n=9,433
+(2022-03-29 to 2022-04-06). All models share the same imputation and encoding
+pipeline, and the target is Box-Cox transformed for training and inverted for
+scoring.
 
-**Naive baseline** (predict training median): test MAE 7.63 min, test R² -0.00.
+| Model | Train MAE | Test MAE | Test RMSE | Train R² | Test R² |
+|---|---|---|---|---|---|
+| Naive baseline (training median) | — | 7.63 | — | — | -0.00 |
+| Linear Regression | 4.79 | 4.81 | 6.06 | 0.59 | 0.59 |
+| Random Forest (tuned) | 2.18 | 3.32 | 4.21 | 0.91 | 0.80 |
+| XGBoost (GPU, untuned) | 2.91 | 3.34 | 4.22 | 0.85 | 0.80 |
+| LightGBM (untuned) | 3.09 | 3.35 | 4.24 | 0.83 | 0.80 |
+| **TabPFN (10k-row training subsample)** | 2.79* | **3.19** | **4.02** | 0.86* | **0.82** |
 
-| Model | Train MAE | Test MAE | Train RMSE | Test RMSE | Train R² | Test R² |
-|---|---|---|---|---|---|---|
-| Linear Regression | 4.79 | 4.81 | 6.02 | 6.06 | 0.59 | 0.59 |
-| Random Forest (tuned) | 2.18 | 3.32 | 2.77 | 4.21 | 0.91 | 0.80 |
-| XGBoost (GPU, untuned) | 2.91 | 3.34 | 3.66 | 4.22 | 0.85 | 0.80 |
-| LightGBM (untuned) | 3.09 | 3.35 | 3.88 | 4.24 | 0.83 | 0.80 |
-| TabPFN (subsampled, untuned) | — | — | — | — | — | — |
+MAE and RMSE are in minutes. \*TabPFN's train metrics are on the 10,000 rows it
+was fit on, not the full training set.
 
-All three tree models comfortably beat the naive baseline and Linear
-Regression. Random Forest, XGBoost and LightGBM land within ~0.03 minutes
-of each other on test MAE, and the tournament confirms none of that gap is
-statistically real (see below) — so as trained here they're
-interchangeable, not one clearly best.
+**Tournament** (paired Wilcoxon signed-rank test on per-row absolute test
+error, α = 0.05):
 
-**Tournament** (champion/challenger, paired Wilcoxon signed-rank test on
-per-row absolute test error):
-
-| Round | p-value | Result |
+| Round | p-value | Outcome |
 |---|---|---|
-| Linear Regression vs Random Forest | 1.16e-292 | Random Forest wins (significant) |
-| Random Forest vs XGBoost | 0.729 | No significant difference — champion holds |
-| Random Forest vs LightGBM | 0.531 | No significant difference — champion holds |
-| Random Forest vs TabPFN | pending re-run | — |
+| Linear Regression vs Random Forest | 1.2e-292 | Random Forest takes the title |
+| Random Forest vs XGBoost | 0.73 | No significant difference, champion holds |
+| Random Forest vs LightGBM | 0.53 | No significant difference, champion holds |
+| Random Forest vs TabPFN | 5.8e-13 | TabPFN takes the title |
 
-**Champion as of the last full run: Random Forest** — saved to
-`model.joblib`. Pending re-run to see whether TabPFN changes this.
+**Champion: TabPFN.**
 
-Worth flagging: Random Forest is the only model that got hyperparameter
-search (`RandomizedSearchCV`, 8 candidates × 3-fold CV); XGBoost and
-LightGBM ran with fixed, untuned hyperparameters, and TabPFN doesn't get
-tuned at all (it's a pretrained model, and was additionally trained on a
-10,000-row subsample rather than the full training set — see Model
-Building above). That's the likely reason Random Forest edges the tree
-models rather than a real algorithmic advantage — a fair tree-model
-comparison would tune all three equally before declaring a winner (see
-Future Improvements). TabPFN's result should be read with its own caveat
-in mind: a strong showing despite the subsample would be a real signal;
-a weak one could just as easily be an artifact of seeing 26,000 fewer
-training rows than everything else.
+### Reading these results
+
+- **The three tree models are statistically tied.** Random Forest, XGBoost and
+  LightGBM finish within 0.03 minutes of each other, and the tournament
+  can't separate them. Random Forest is also the only one of the three that
+  got a hyperparameter search, so its small lead may come from tuning rather
+  than from the algorithm.
+- **TabPFN's win is real but small in practice.** It's significant
+  (p = 5.8e-13) and it trained on 26,000 fewer rows than the other models, but
+  the gain over Random Forest is about 0.13 minutes of MAE (roughly 8 seconds
+  per order).
+- **TabPFN is harder to deploy.** The tree models are self-contained sklearn
+  pipelines. TabPFN needs a GPU for fast local inference, or a hosted API and
+  a `TABPFN_TOKEN`. For production, Random Forest or XGBoost is the safer
+  choice unless those 8 seconds matter.
 
 ---
 
-## Future Improvements
-- Tune XGBoost and LightGBM with the same `RandomizedSearchCV` treatment
-  Random Forest got — right now Random Forest's win in the tournament may
-  just reflect that it's the only tuned model, not a real algorithmic edge
-- Try TabPFN's own ensembling/bagging extensions (e.g. `tabpfn-extensions`)
-  to use more than `TABPFN_MAX_TRAIN_SAMPLES` rows of training data instead
-  of a single subsample, and see if that closes any gap with the tree
-  models
-- Let XGBoost/LightGBM handle missing values natively instead of running
-  them through the shared KNN-imputation step (would need each model on
-  its own preprocessing branch, and a separate A/B test to check it's
-  actually worth the added complexity vs. the shared pipeline)
-- Add real-time traffic and weather APIs
-- Deploy as a real-time prediction service
+## Methodology
+
+1. **Cleaning** (`swiggy_delivery.data_cleaning`): normalises column names and
+   string values, drops riders under 18 and invalid 6-star ratings, fixes
+   coordinates, extracts date and time-of-day features, and computes
+   haversine distance and distance bands.
+2. **Chronological split** (`model_utils.time_based_split`): the latest 20% of
+   order dates form the test set, and the cutoff falls on a date boundary so no
+   single day is split across train and test. A random split would leak
+   same-day conditions into training.
+3. **Leakage control**: `pickup_time_minutes` is dropped because it isn't
+   known when the ETA is predicted.
+4. **Preprocessing**: mode or constant imputation, MinMax scaling, one-hot and
+   ordinal encoding, then KNN imputation. The ordinal encoder keeps missing
+   values as `NaN` rather than a `-999` sentinel, which KNN would treat as a
+   real, far-away value.
+5. **Models**: Linear Regression, Random Forest (`RandomizedSearchCV`, 8
+   candidates × 3-fold), XGBoost (uses a GPU when one is detected), LightGBM
+   (CPU), and TabPFN (pretrained tabular foundation model; its attention cost
+   grows roughly quadratically with the number of rows, so training is capped
+   at 10,000 seeded rows while evaluation uses the full test set).
+6. **Tournament** (`swiggy_delivery.ab_test`): each challenger must beat the
+   current champion on the same test rows with a significant paired test. A
+   lower average error alone isn't enough.
 
 ---
 
 ## Project Structure
+
 ```
-├── swiggy.csv
-├── Data Cleaning.ipynb
-├── Food_Delivery_EDA.ipynb
-├── data_clean_utils.py
-├── swiggy_cleaned.csv
-├── model_building.ipynb      # exploratory notebook: EDA + model comparison
-├── model_utils.py            # chronological split, naive baseline, ordinal encoding
-├── ab_test.py                # paired significance test between two models
-├── train_model.py            # end-to-end script version of the notebook's modeling
-├── model.joblib               # saved winning pipeline (generated by train_model.py)
-└── tests/                    # pytest tests for data_clean_utils.py, model_utils.py, ab_test.py
+├── data/
+│   ├── raw/swiggy.csv                  # original dataset
+│   ├── interim/cleaned_data.csv        # exploratory cleaning output (notebook 01)
+│   └── processed/swiggy_cleaned.csv    # modelling input (swiggy_delivery.data_cleaning)
+├── notebooks/
+│   ├── 01_data_cleaning.ipynb          # step-by-step cleaning exploration
+│   ├── 02_eda.ipynb                    # exploratory data analysis
+│   └── 03_model_building.ipynb         # modelling + tournament (run on Colab GPU)
+├── src/swiggy_delivery/
+│   ├── config.py                       # project paths
+│   ├── data_cleaning.py                # raw → processed cleaning pipeline
+│   ├── model_utils.py                  # chronological split, naive baseline, encoder
+│   ├── ab_test.py                      # paired Wilcoxon model comparison
+│   └── train.py                        # end-to-end training + tournament script
+├── models/                             # trained artifacts (gitignored)
+├── tests/                              # pytest unit tests
+├── pyproject.toml
+└── requirements.txt                    # flat dependency list for Colab
 ```
+
+---
+
+## Getting Started
+
+### Local
+
+```bash
+git clone https://github.com/Akashkar00/Swiggy-Delivery-Time-Prediction.git
+cd Swiggy-Delivery-Time-Prediction
+
+uv venv && source .venv/bin/activate
+uv pip install -e ".[notebooks,dev]"
+
+pytest                                   # run unit tests
+python -m swiggy_delivery.data_cleaning  # data/raw → data/processed
+python -m swiggy_delivery.train          # train all models, save champion to models/
+```
+
+Training includes TabPFN, which needs PyTorch and is slow without a GPU.
+
+### Google Colab
+
+1. Open `notebooks/03_model_building.ipynb` from GitHub (the badge at the top
+   of the notebook, or File → Open notebook → GitHub).
+2. Runtime → Change runtime type → GPU.
+3. If TabPFN asks for a token, add it as a Colab secret named `TABPFN_TOKEN`
+   (key icon in the left sidebar). **Never paste the token into a cell**,
+   because the notebook gets committed.
+4. Runtime → Run all. The first cell clones the repo, installs requirements and
+   sets the working directory.
+
+---
+
+## Future Improvements
+
+- Give XGBoost and LightGBM the same hyperparameter search as Random Forest
+  before reading anything into the tree-model rankings.
+- Use TabPFN's ensembling extensions (`tabpfn-extensions`) to train on more
+  than 10,000 rows.
+- Let the gradient-boosted models handle missing values natively instead of
+  going through the shared KNN imputer.
+- Add a lightweight prediction API around the saved pipeline.

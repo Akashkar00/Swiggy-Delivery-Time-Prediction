@@ -34,13 +34,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, PowerTransformer
 from xgboost import XGBRegressor
 
-from ab_test import compare_model_errors
-from model_utils import build_ordinal_encoder, naive_median_predictions, time_based_split
+from swiggy_delivery.ab_test import compare_model_errors
+from swiggy_delivery.config import MODEL_PATH, PROCESSED_DATA_PATH
+from swiggy_delivery.model_utils import build_ordinal_encoder, naive_median_predictions, time_based_split
 
 set_config(transform_output="pandas")
-
-DATA_PATH = "swiggy_cleaned.csv"
-MODEL_PATH = "model.joblib"
 
 COLUMNS_TO_DROP = [
     "rider_id",
@@ -124,7 +122,7 @@ def evaluate(y_true, y_pred_transformed, power_transformer):
 
 
 def main():
-    df = pd.read_csv(DATA_PATH, parse_dates=["order_date"])
+    df = pd.read_csv(PROCESSED_DATA_PATH, parse_dates=["order_date"])
     df = df.drop(columns=COLUMNS_TO_DROP)
 
     train_df, test_df = time_based_split(df, date_col="order_date", test_size=0.2)
@@ -251,6 +249,7 @@ def main():
             champion_name, champion_pipe, champion_errors = challenger_name, challenger_pipe, challenger_errors
 
     print(f"\nFinal champion: {champion_name}")
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump({"pipeline": champion_pipe, "power_transformer": pt}, MODEL_PATH)
     print(f"Saved winning model to {MODEL_PATH}")
 

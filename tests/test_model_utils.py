@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from model_utils import naive_median_predictions, time_based_split
+from swiggy_delivery.model_utils import naive_median_predictions, time_based_split
 
 
 def test_time_based_split_puts_latest_dates_in_test_set():
@@ -41,7 +41,7 @@ def test_naive_median_predictions_repeats_train_median_for_every_test_row():
 
 
 def test_build_ordinal_encoder_represents_missing_values_as_nan_not_a_magic_number():
-    from model_utils import build_ordinal_encoder
+    from swiggy_delivery.model_utils import build_ordinal_encoder
 
     encoder = build_ordinal_encoder(categories=[["low", "medium", "high"]])
     encoded = encoder.fit_transform(pd.DataFrame({"traffic": ["low", np.nan, "high"]}))

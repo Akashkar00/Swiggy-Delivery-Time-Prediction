@@ -1,6 +1,6 @@
 import numpy as np
 
-from ab_test import compare_model_errors
+from swiggy_delivery.ab_test import compare_model_errors
 
 
 def test_compare_model_errors_picks_the_model_with_consistently_lower_error():

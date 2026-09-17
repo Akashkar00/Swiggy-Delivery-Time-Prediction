@@ -1,5 +1,9 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+from swiggy_delivery.config import PROCESSED_DATA_PATH, RAW_DATA_PATH
 
 
 def change_column_names(data: pd.DataFrame):
@@ -167,8 +171,7 @@ def create_distance_type(data: pd.DataFrame):
     ))
 
 
-def perform_data_cleaning(data: pd.DataFrame, saved_data_path="swiggy_cleaned.csv"):
-    
+def perform_data_cleaning(data: pd.DataFrame, saved_data_path=PROCESSED_DATA_PATH):
     cleaned_data = (
         data
         .pipe(change_column_names)
@@ -177,18 +180,13 @@ def perform_data_cleaning(data: pd.DataFrame, saved_data_path="swiggy_cleaned.cs
         .pipe(calculate_haversine_distance)
         .pipe(create_distance_type)
     )
-    
-    # save the data
-    cleaned_data.to_csv(saved_data_path,index=False)
-    
-    
+
+    Path(saved_data_path).parent.mkdir(parents=True, exist_ok=True)
+    cleaned_data.to_csv(saved_data_path, index=False)
+
 
 if __name__ == "__main__":
-    # data path for data
-    DATA_PATH = "swiggy.csv"
-    
-    # read the data from path
-    df = pd.read_csv(DATA_PATH)
-    print('swiggy data loaded successfuly')
-    
-    perform_data_cleaning(df) 
+    df = pd.read_csv(RAW_DATA_PATH)
+    print(f"loaded {len(df)} rows from {RAW_DATA_PATH}")
+    perform_data_cleaning(df)
+    print(f"saved cleaned data to {PROCESSED_DATA_PATH}")
