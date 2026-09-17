@@ -1,0 +1,14 @@
+numpy
+pandas
+matplotlib
+seaborn
+scipy
+scikit-learn
+missingno
+plotly
+ipykernel
+nbformat
+joblib
+pytest
+xgboost
+lightgbm
