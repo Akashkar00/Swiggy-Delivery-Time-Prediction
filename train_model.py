@@ -22,6 +22,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
+from tabpfn import TabPFNRegressor
 from sklearn import set_config
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
@@ -63,6 +64,13 @@ ORDINAL_CAT_COLS = ["traffic", "distance_type"]
 TRAFFIC_ORDER = ["low", "medium", "high", "jam"]
 DISTANCE_TYPE_ORDER = ["short", "medium", "long", "very_long"]
 MODE_IMPUTE_COLS = ["multiple_deliveries", "festival", "city_type"]
+
+# TabPFN's attention scales ~quadratically with the number of rows given as
+# context, so unlike the tree models it isn't built for a training set this
+# size. Cap training rows for it specifically (seeded, so reproducible);
+# evaluation still runs on the full test set, so the tournament comparison
+# against the other models stays valid.
+TABPFN_MAX_TRAIN_SAMPLES = 10_000
 
 
 def build_pipeline(model):
@@ -201,6 +209,30 @@ def main():
     print(f"\nLightGBM train: {lgbm_train_metrics}")
     print(f"LightGBM test:  {lgbm_metrics}")
     candidates.append(("lightgbm", lgbm_pipe, lgbm_test_preds))
+
+    # TabPFN - a pretrained tabular foundation model (in-context learning,
+    # no hyperparameter search). Subsample training rows since its
+    # attention doesn't scale to a training set this size; test evaluation
+    # still uses the full held-out set.
+    if len(X_train) > TABPFN_MAX_TRAIN_SAMPLES:
+        tabpfn_rng = np.random.RandomState(42)
+        tabpfn_idx = tabpfn_rng.choice(len(X_train), size=TABPFN_MAX_TRAIN_SAMPLES, replace=False)
+        X_train_tabpfn = X_train.iloc[tabpfn_idx]
+        y_train_pt_tabpfn = y_train_pt[tabpfn_idx]
+        y_train_tabpfn = y_train.iloc[tabpfn_idx]
+    else:
+        X_train_tabpfn = X_train
+        y_train_pt_tabpfn = y_train_pt
+        y_train_tabpfn = y_train
+    print(f"\nTabPFN training rows: {len(X_train_tabpfn)} (of {len(X_train)} available)")
+
+    tabpfn_pipe = build_pipeline(TabPFNRegressor(device=xgb_device))
+    tabpfn_pipe.fit(X_train_tabpfn, y_train_pt_tabpfn)
+    tabpfn_metrics, tabpfn_test_preds = evaluate(y_test, tabpfn_pipe.predict(X_test), pt)
+    tabpfn_train_metrics, _ = evaluate(y_train_tabpfn, tabpfn_pipe.predict(X_train_tabpfn), pt)
+    print(f"TabPFN train: {tabpfn_train_metrics}")
+    print(f"TabPFN test:  {tabpfn_metrics}")
+    candidates.append(("tabpfn", tabpfn_pipe, tabpfn_test_preds))
 
     # Champion/challenger tournament: each challenger must beat the current
     # champion by a statistically significant margin (paired Wilcoxon

@@ -12,3 +12,4 @@ joblib
 pytest
 xgboost
 lightgbm
+tabpfn

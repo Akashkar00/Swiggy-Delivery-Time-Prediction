@@ -59,28 +59,42 @@ Models compared:
   Colab GPU runtime), falls back to CPU otherwise.
 - **LightGBM** — CPU only; GPU LightGBM needs a special build not
   guaranteed to be present on a stock Colab image.
+- **TabPFN** — a pretrained tabular foundation model (Prior Labs) that
+  does in-context learning instead of training from scratch, so it needs
+  no hyperparameter search. Its attention scales roughly quadratically
+  with the number of rows given as context, so it isn't built for a
+  training set this size: training is subsampled down to a fixed cap
+  (`TABPFN_MAX_TRAIN_SAMPLES`, seeded for reproducibility) before fitting.
+  Test-set evaluation still uses the full held-out set, so its tournament
+  comparison against the other models stays valid — but its train-set
+  metrics reflect only the subsample it saw, not the full training set.
 
-All four reuse the same imputation + encoding pipeline, so they're
-compared on identical features.
+All five reuse the same imputation + encoding pipeline, so they're
+compared on identical features (TabPFN additionally on fewer rows, as
+above).
 
 ### 5. Model Evaluation
 Metrics: MAE, RMSE, R² — each reported for both train and test so an
 overfitting gap is visible, not hidden.
 
 ### 6. Model Tournament (A/B Testing)
-Rather than eyeballing four models' aggregate metrics side by side,
+Rather than eyeballing five models' aggregate metrics side by side,
 `ab_test.py` runs a champion/challenger tournament: starting from Linear
-Regression, each next model (Random Forest, then XGBoost, then LightGBM)
-only takes the title if its per-row absolute errors on the *same* test
-rows are significantly lower by a paired Wilcoxon signed-rank test — not
-just numerically lower, which could be noise on this test set. The final
-champion is what gets saved to `model.joblib`.
+Regression, each next model (Random Forest, then XGBoost, then LightGBM,
+then TabPFN) only takes the title if its per-row absolute errors on the
+*same* test rows are significantly lower by a paired Wilcoxon signed-rank
+test — not just numerically lower, which could be noise on this test set.
+The final champion is what gets saved to `model.joblib`.
 
 ---
 
 ## Results
 
 Trained on Colab (train n=36,069, test n=9,433, chronological split).
+Numbers below are from before TabPFN was added — Linear Regression,
+Random Forest, XGBoost and LightGBM are unaffected (same seeds, same
+data) and won't change on a re-run, but TabPFN's row and the tournament's
+final champion are pending a re-run with the updated notebook.
 
 **Naive baseline** (predict training median): test MAE 7.63 min, test R² -0.00.
 
@@ -90,6 +104,7 @@ Trained on Colab (train n=36,069, test n=9,433, chronological split).
 | Random Forest (tuned) | 2.18 | 3.32 | 2.77 | 4.21 | 0.91 | 0.80 |
 | XGBoost (GPU, untuned) | 2.91 | 3.34 | 3.66 | 4.22 | 0.85 | 0.80 |
 | LightGBM (untuned) | 3.09 | 3.35 | 3.88 | 4.24 | 0.83 | 0.80 |
+| TabPFN (subsampled, untuned) | — | — | — | — | — | — |
 
 All three tree models comfortably beat the naive baseline and Linear
 Regression. Random Forest, XGBoost and LightGBM land within ~0.03 minutes
@@ -105,15 +120,23 @@ per-row absolute test error):
 | Linear Regression vs Random Forest | 1.16e-292 | Random Forest wins (significant) |
 | Random Forest vs XGBoost | 0.729 | No significant difference — champion holds |
 | Random Forest vs LightGBM | 0.531 | No significant difference — champion holds |
+| Random Forest vs TabPFN | pending re-run | — |
 
-**Final champion: Random Forest** — saved to `model.joblib`.
+**Champion as of the last full run: Random Forest** — saved to
+`model.joblib`. Pending re-run to see whether TabPFN changes this.
 
 Worth flagging: Random Forest is the only model that got hyperparameter
 search (`RandomizedSearchCV`, 8 candidates × 3-fold CV); XGBoost and
-LightGBM ran with fixed, untuned hyperparameters. That's the likely reason
-Random Forest edges the other two rather than a real algorithmic
-advantage — a fair comparison would tune all three equally before
-declaring a winner (see Future Improvements).
+LightGBM ran with fixed, untuned hyperparameters, and TabPFN doesn't get
+tuned at all (it's a pretrained model, and was additionally trained on a
+10,000-row subsample rather than the full training set — see Model
+Building above). That's the likely reason Random Forest edges the tree
+models rather than a real algorithmic advantage — a fair tree-model
+comparison would tune all three equally before declaring a winner (see
+Future Improvements). TabPFN's result should be read with its own caveat
+in mind: a strong showing despite the subsample would be a real signal;
+a weak one could just as easily be an artifact of seeing 26,000 fewer
+training rows than everything else.
 
 ---
 
@@ -121,6 +144,10 @@ declaring a winner (see Future Improvements).
 - Tune XGBoost and LightGBM with the same `RandomizedSearchCV` treatment
   Random Forest got — right now Random Forest's win in the tournament may
   just reflect that it's the only tuned model, not a real algorithmic edge
+- Try TabPFN's own ensembling/bagging extensions (e.g. `tabpfn-extensions`)
+  to use more than `TABPFN_MAX_TRAIN_SAMPLES` rows of training data instead
+  of a single subsample, and see if that closes any gap with the tree
+  models
 - Let XGBoost/LightGBM handle missing values natively instead of running
   them through the shared KNN-imputation step (would need each model on
   its own preprocessing branch, and a separate A/B test to check it's
